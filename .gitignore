@@ -1,0 +1,23 @@
+# Credentials and environment files
+.env
+.env.*
+!.env.example
+
+# Python files
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+.coverage
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE files
+.vscode/
+.idea/
+
+# Operating-system files
+.DS_Store
+Thumbs.db

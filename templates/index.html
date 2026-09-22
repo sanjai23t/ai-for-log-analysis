@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>AI Jenkins Troubleshooter</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+    <header class="header">
+        <h1>AI Jenkins Troubleshooter</h1>
+        <p>Select a Jenkins build and receive a short AI analysis</p>
+    </header>
+
+    <main class="container">
+        <section class="panel selection-panel">
+            <h2>Select Jenkins Build</h2>
+
+            <label for="job-select">Pipeline</label>
+
+            <select id="job-select">
+                <option value="">Loading pipelines...</option>
+            </select>
+
+            <label for="build-select">Build</label>
+
+            <select id="build-select" disabled>
+                <option value="">Select a pipeline first</option>
+            </select>
+
+            <div id="build-details" class="build-details">
+                <span id="status-badge" class="status-badge">
+                    No build selected
+                </span>
+
+                <p id="build-metadata"></p>
+            </div>
+
+            <button id="analyze-button" type="button" disabled>
+                Analyze Selected Build
+            </button>
+
+            <p id="operation-message"></p>
+        </section>
+
+        <section class="panel result-panel">
+            <h2>AI Analysis</h2>
+
+            <div id="analysis-result">
+                Select a pipeline and build to begin.
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Local AI-assisted Jenkins troubleshooting</p>
+    </footer>
+
+    <script>
+        const jobSelect = document.getElementById("job-select");
+        const buildSelect = document.getElementById("build-select");
+        const analyzeButton = document.getElementById("analyze-button");
+        const statusBadge = document.getElementById("status-badge");
+        const buildMetadata = document.getElementById("build-metadata");
+        const operationMessage =
+            document.getElementById("operation-message");
+        const analysisResult =
+            document.getElementById("analysis-result");
+
+        function formatStatus(status) {
+            const labels = {
+                SUCCESS: "Success",
+                FAILURE: "Failed",
+                ABORTED: "Aborted",
+                UNSTABLE: "Unstable",
+                NOT_BUILT: "Not Built",
+                RUNNING: "Running"
+            };
+
+            return labels[status] || status;
+        }
+
+        function updateStatus(status) {
+            statusBadge.className =
+                `status-badge status-${status.toLowerCase()}`;
+
+            statusBadge.textContent = formatStatus(status);
+        }
+
+        async function loadPipelines() {
+            try {
+                const response = await fetch("/api/jenkins/jobs");
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        result.error || "Unable to load pipelines."
+                    );
+                }
+
+                jobSelect.textContent = "";
+
+                const defaultOption = document.createElement("option");
+                defaultOption.value = "";
+                defaultOption.textContent = "Select a pipeline";
+                jobSelect.appendChild(defaultOption);
+
+                result.jobs.forEach((job) => {
+                    const option = document.createElement("option");
+
+                    option.value = job.name;
+                    option.textContent = job.name;
+
+                    jobSelect.appendChild(option);
+                });
+            } catch (error) {
+                jobSelect.textContent = "";
+
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "Unable to load pipelines";
+
+                jobSelect.appendChild(option);
+                operationMessage.textContent = error.message;
+            }
+        }
+
+        jobSelect.addEventListener("change", async () => {
+            const jobName = jobSelect.value;
+
+            buildSelect.disabled = true;
+            analyzeButton.disabled = true;
+            buildSelect.textContent = "";
+            buildMetadata.textContent = "";
+            statusBadge.className = "status-badge";
+            statusBadge.textContent = "No build selected";
+            analysisResult.textContent =
+                "Select a pipeline and build to begin.";
+
+            if (!jobName) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "Select a pipeline first";
+                buildSelect.appendChild(option);
+                return;
+            }
+
+            operationMessage.textContent = "Loading builds...";
+
+            try {
+                const response = await fetch(
+                    "/api/jenkins/builds",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            job_name: jobName
+                        })
+                    }
+                );
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        result.error || "Unable to load builds."
+                    );
+                }
+
+                const defaultOption =
+                    document.createElement("option");
+
+                defaultOption.value = "";
+                defaultOption.textContent = "Select a build";
+                buildSelect.appendChild(defaultOption);
+
+                result.builds.forEach((build) => {
+                    const option =
+                        document.createElement("option");
+
+                    option.value = build.number;
+                    option.dataset.status = build.status;
+                    option.dataset.timestamp = build.timestamp || "";
+                    option.dataset.duration = build.duration || "";
+
+                    option.textContent =
+                        `Build #${build.number} — ` +
+                        formatStatus(build.status);
+
+                    buildSelect.appendChild(option);
+                });
+
+                buildSelect.disabled = false;
+                operationMessage.textContent =
+                    `${result.count} recent builds loaded.`;
+            } catch (error) {
+                operationMessage.textContent =
+                    `Error: ${error.message}`;
+            }
+        });
+
+        buildSelect.addEventListener("change", () => {
+            const selectedOption =
+                buildSelect.options[buildSelect.selectedIndex];
+
+            if (!selectedOption.value) {
+                analyzeButton.disabled = true;
+                statusBadge.className = "status-badge";
+                statusBadge.textContent = "No build selected";
+                buildMetadata.textContent = "";
+                return;
+            }
+
+            const status = selectedOption.dataset.status;
+            const timestamp = Number(
+                selectedOption.dataset.timestamp
+            );
+            const duration = Number(
+                selectedOption.dataset.duration
+            );
+
+            updateStatus(status);
+
+            const buildDate = timestamp
+                ? new Date(timestamp).toLocaleString()
+                : "Unknown";
+
+            const durationSeconds = duration
+                ? Math.round(duration / 1000)
+                : 0;
+
+            buildMetadata.textContent =
+                `Build #${selectedOption.value} | ` +
+                `${buildDate} | ${durationSeconds} seconds`;
+
+            analyzeButton.disabled = status === "RUNNING";
+            operationMessage.textContent = "";
+        });
+
+        analyzeButton.addEventListener("click", async () => {
+            const jobName = jobSelect.value;
+            const buildNumber = Number(buildSelect.value);
+
+            if (!jobName || !buildNumber) {
+                operationMessage.textContent =
+                    "Please select a pipeline and build.";
+                return;
+            }
+
+            analyzeButton.disabled = true;
+            analyzeButton.textContent = "Analyzing...";
+            operationMessage.textContent =
+                "Retrieving and analyzing the selected build...";
+            analysisResult.textContent =
+                "The local AI model is analyzing the build.";
+
+            try {
+                const logResponse = await fetch(
+                    "/api/jenkins/build-log",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            job_name: jobName,
+                            build_number: buildNumber
+                        })
+                    }
+                );
+
+                const logResult = await logResponse.json();
+
+                if (!logResponse.ok) {
+                    throw new Error(
+                        logResult.error ||
+                        "Unable to retrieve the build log."
+                    );
+                }
+
+                const analysisResponse = await fetch(
+                    "/api/analyze",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+						body: JSON.stringify({
+							jenkins_log: logResult.console_log,
+							job_name: jobName,
+							build_number: buildNumber,
+							build_status: logResult.status
+						})
+                    }
+                );
+
+                const analysis = await analysisResponse.json();
+
+                if (!analysisResponse.ok) {
+                    throw new Error(
+                        analysis.error ||
+                        "Unable to analyze the build."
+                    );
+                }
+
+                analysisResult.textContent =
+                    `Pipeline: ${jobName}\n` +
+                    `Build: #${buildNumber}\n` +
+                    `Status: ${formatStatus(logResult.status)}\n\n` +
+                    analysis.analysis;
+
+                operationMessage.textContent =
+                    "Analysis completed successfully.";
+            } catch (error) {
+                analysisResult.textContent =
+                    `Error: ${error.message}`;
+
+                operationMessage.textContent =
+                    "Analysis failed.";
+            } finally {
+                analyzeButton.disabled = false;
+                analyzeButton.textContent =
+                    "Analyze Selected Build";
+            }
+        });
+
+        loadPipelines();
+    </script>
+</body>
+</html>
